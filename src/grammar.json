@@ -6117,12 +6117,16 @@
     },
     "_reserved_identifier": {
       "type": "PREC_DYNAMIC",
-      "value": 1,
+      "value": -1,
       "content": {
         "type": "ALIAS",
         "content": {
           "type": "CHOICE",
           "members": [
+            {
+              "type": "STRING",
+              "value": "abstract"
+            },
             {
               "type": "STRING",
               "value": "actual"
@@ -6133,15 +6137,23 @@
             },
             {
               "type": "STRING",
-              "value": "constructor"
-            },
-            {
-              "type": "STRING",
               "value": "const"
             },
             {
               "type": "STRING",
+              "value": "constructor"
+            },
+            {
+              "type": "STRING",
+              "value": "crossinline"
+            },
+            {
+              "type": "STRING",
               "value": "data"
+            },
+            {
+              "type": "STRING",
+              "value": "dynamic"
             },
             {
               "type": "STRING",
@@ -6153,7 +6165,11 @@
             },
             {
               "type": "STRING",
-              "value": "inner"
+              "value": "external"
+            },
+            {
+              "type": "STRING",
+              "value": "final"
             },
             {
               "type": "STRING",
@@ -6161,7 +6177,35 @@
             },
             {
               "type": "STRING",
-              "value": "set"
+              "value": "import"
+            },
+            {
+              "type": "STRING",
+              "value": "infix"
+            },
+            {
+              "type": "STRING",
+              "value": "inline"
+            },
+            {
+              "type": "STRING",
+              "value": "inner"
+            },
+            {
+              "type": "STRING",
+              "value": "internal"
+            },
+            {
+              "type": "STRING",
+              "value": "lateinit"
+            },
+            {
+              "type": "STRING",
+              "value": "noinline"
+            },
+            {
+              "type": "STRING",
+              "value": "open"
             },
             {
               "type": "STRING",
@@ -6169,7 +6213,43 @@
             },
             {
               "type": "STRING",
+              "value": "override"
+            },
+            {
+              "type": "STRING",
+              "value": "private"
+            },
+            {
+              "type": "STRING",
+              "value": "protected"
+            },
+            {
+              "type": "STRING",
+              "value": "public"
+            },
+            {
+              "type": "STRING",
+              "value": "sealed"
+            },
+            {
+              "type": "STRING",
+              "value": "set"
+            },
+            {
+              "type": "STRING",
+              "value": "suspend"
+            },
+            {
+              "type": "STRING",
+              "value": "tailrec"
+            },
+            {
+              "type": "STRING",
               "value": "value"
+            },
+            {
+              "type": "STRING",
+              "value": "vararg"
             }
           ]
         },
@@ -6283,6 +6363,51 @@
     ],
     [
       "function_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "function_modifier",
+      "type_modifiers",
+      "_reserved_identifier"
+    ],
+    [
+      "inheritance_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "member_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "parameter_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "parameter_modifiers"
+    ],
+    [
+      "visibility_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "type_modifiers",
+      "_reserved_identifier"
+    ],
+    [
+      "import",
+      "_reserved_identifier"
+    ],
+    [
+      "_receiver_type",
+      "_reserved_identifier"
+    ],
+    [
+      "type",
+      "_reserved_identifier"
+    ],
+    [
+      "type",
+      "_receiver_type",
       "_reserved_identifier"
     ],
     [

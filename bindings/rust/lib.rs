@@ -47,4 +47,141 @@ mod tests {
             .set_language(&super::LANGUAGE.into())
             .expect("Error loading Kotlin parser");
     }
+    #[test]
+    fn soft_keywords_remain_identifiers_outside_keyword_contexts() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        for keyword in [
+            "abstract",
+            "actual",
+            "annotation",
+            "by",
+            "catch",
+            "companion",
+            "const",
+            "constructor",
+            "context",
+            "crossinline",
+            "data",
+            "delegate",
+            "dynamic",
+            "enum",
+            "expect",
+            "external",
+            "field",
+            "file",
+            "final",
+            "finally",
+            "get",
+            "import",
+            "infix",
+            "init",
+            "inline",
+            "inner",
+            "internal",
+            "lateinit",
+            "noinline",
+            "open",
+            "operator",
+            "out",
+            "override",
+            "param",
+            "private",
+            "property",
+            "protected",
+            "public",
+            "receiver",
+            "reified",
+            "sealed",
+            "set",
+            "setparam",
+            "suspend",
+            "tailrec",
+            "value",
+            "vararg",
+            "where",
+        ] {
+            for source in [
+                format!("{keyword}(\"x\")\n"),
+                format!("fun sample() {{ row {{ {keyword}(\"x\") }}; text(\"${{value}}\") }}"),
+                format!("fun sample({keyword}: String) = {keyword}"),
+                format!("fun sample() {{ val {keyword} = \"x\"; row {{ {keyword}(\"x\") }} }}"),
+                format!("fun sample() {{ row({keyword} = \"x\") }}"),
+                format!("fun sample() {{ owner.{keyword}(\"x\") }}"),
+            ] {
+                let tree = parser.parse(&source, None).unwrap();
+                assert!(
+                    !tree.root_node().has_error(),
+                    "{source}: {}",
+                    tree.root_node().to_sexp()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn annotations_preserve_modifier_declarations() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        for source in [
+            "@Marker\npublic object Options {\npublic const val NAME: String = \"x\"\n}\n",
+            "@Marker\nannotation class Marker",
+            "@Marker\ndata class Value(val value: Int)",
+            "class Outer {\n@Marker\ninner class Inner\n}\n",
+            "inline fun <reified T> sample(crossinline crossinline: () -> Unit, noinline noinline: () -> Unit, vararg vararg: Int) {}",
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            assert!(!tree.root_node().has_error(), "{source}: {}", tree.root_node().to_sexp());
+            let kind = tree.root_node().named_child(0).unwrap().kind();
+            assert!(matches!(kind, "class_declaration" | "object_declaration" | "function_declaration"), "{source}: {kind}");
+        }
+    }
+
+    #[test]
+    fn nested_open_callbacks_with_interpolation_parse_without_recovery() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        let source = r###"
+fun x() {
+    x(null) {
+      x(x = x.x, x = x.x(x(1.5f))) {
+        x(
+          x(
+            x("x", "x", "x", x = !x) { open(x.x) },
+          ),
+        )
+      }
+      x(x = x.x(x(1f)), x = x.x(x(0.5f))) {
+        x(x(x.x), if (x.x) x.x else x.x)
+        if (x.x) x("x", x.x)
+        if (x.x) x("x", x.x)
+        if (x.x == "x") x("x")
+        (x.x.x { x(x.x) }).x { x(x(x)) }
+        if (x.x != null) {
+          x("${x}" + if (x.x == x.x) "x" else "x", x.x)
+          if (x.x) x("x", x.x)
+        }
+      }
+      x(x = x.x(x(1f)), x = x.x(x(1f))) {
+        when {
+          x && x.x != null -> {
+            if (x.x && x != null) {
+              x(x = { open(x.x(x.x)) }, x = x && !x.x, x = x.x("x")) {
+                x("${x}")
+              }
+            }
+          }
+        }
+      }
+    }
+
+}
+"###;
+        let tree = parser.parse(source, None).unwrap();
+        assert!(
+            !tree.root_node().has_error(),
+            "{}",
+            tree.root_node().to_sexp()
+        );
+    }
 }
