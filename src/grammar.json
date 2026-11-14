@@ -901,7 +901,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "identifier"
+          "name": "_identifier"
         },
         {
           "type": "CHOICE",
@@ -1743,7 +1743,7 @@
                   },
                   {
                     "type": "SYMBOL",
-                    "name": "identifier"
+                    "name": "_identifier"
                   },
                   {
                     "type": "CHOICE",
@@ -2249,7 +2249,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "identifier"
+          "name": "_identifier"
         },
         {
           "type": "CHOICE",
@@ -6137,6 +6137,10 @@
             },
             {
               "type": "STRING",
+              "value": "companion"
+            },
+            {
+              "type": "STRING",
               "value": "const"
             },
             {
@@ -6185,6 +6189,10 @@
             },
             {
               "type": "STRING",
+              "value": "init"
+            },
+            {
+              "type": "STRING",
               "value": "inline"
             },
             {
@@ -6213,6 +6221,10 @@
             },
             {
               "type": "STRING",
+              "value": "out"
+            },
+            {
+              "type": "STRING",
               "value": "override"
             },
             {
@@ -6226,6 +6238,10 @@
             {
               "type": "STRING",
               "value": "public"
+            },
+            {
+              "type": "STRING",
+              "value": "reified"
             },
             {
               "type": "STRING",
@@ -6386,6 +6402,13 @@
       "parameter_modifiers"
     ],
     [
+      "variance_modifier",
+      "_reserved_identifier"
+    ],
+    [
+      "type_parameter_modifiers"
+    ],
+    [
       "visibility_modifier",
       "_reserved_identifier"
     ],
@@ -6395,6 +6418,14 @@
     ],
     [
       "import",
+      "_reserved_identifier"
+    ],
+    [
+      "anonymous_initializer",
+      "_reserved_identifier"
+    ],
+    [
+      "secondary_constructor",
       "_reserved_identifier"
     ],
     [

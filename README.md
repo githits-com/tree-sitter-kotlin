@@ -36,7 +36,7 @@ The grammar also admits modifier/soft keywords as identifiers in expression
 contexts. The reserved-identifier fallback has lower dynamic precedence than a
 complete declaration, so an annotated `public object` or `annotation class`
 retains its declaration role. Unit cases cover all 48 documented soft/modifier
-keywords in six identifier contexts, modifier declarations, and nested `open`
+keywords in thirteen identifier contexts, modifier declarations, and nested `open`
 callbacks with interpolation. Generated ABI14 sources use tree-sitter CLI0.24.6;
 package version, dependencies, scanner and headers are unchanged by this repair.
 The upstream MIT license and attribution are retained.

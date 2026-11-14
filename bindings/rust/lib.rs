@@ -108,6 +108,13 @@ mod tests {
                 format!("fun sample() {{ val {keyword} = \"x\"; row {{ {keyword}(\"x\") }} }}"),
                 format!("fun sample() {{ row({keyword} = \"x\") }}"),
                 format!("fun sample() {{ owner.{keyword}(\"x\") }}"),
+                format!("class C<{keyword}>"),
+                format!("fun <{keyword}> sample(value: {keyword}) = value"),
+                format!("fun sample() {{ consume<{keyword}>() }}"),
+                format!("class {keyword}"),
+                format!("enum class C {{ {keyword} }}"),
+                format!("var value: String = \"x\"\n set({keyword}) {{}}"),
+                format!("inline fun <reified {keyword}> sample(value: {keyword}) = value"),
             ] {
                 let tree = parser.parse(&source, None).unwrap();
                 assert!(
@@ -134,6 +141,29 @@ mod tests {
             assert!(!tree.root_node().has_error(), "{source}: {}", tree.root_node().to_sexp());
             let kind = tree.root_node().named_child(0).unwrap().kind();
             assert!(matches!(kind, "class_declaration" | "object_declaration" | "function_declaration"), "{source}: {kind}");
+        }
+    }
+
+    #[test]
+    fn keyword_names_retain_generic_enum_and_setter_roles() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        for (source, expected_kind) in [
+            ("class C<out, reified>", "type_parameter"),
+            (
+                "inline fun <reified out> sample(value: out) = value",
+                "type_parameter",
+            ),
+            ("enum class C { open, companion, init }", "enum_entry"),
+            ("var value: String = \"x\"\n set(crossinline) {}", "setter"),
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            let sexp = tree.root_node().to_sexp();
+            assert!(!tree.root_node().has_error(), "{source}: {sexp}");
+            assert!(
+                sexp.contains(&format!("({expected_kind}")),
+                "{source}: {sexp}"
+            );
         }
     }
 

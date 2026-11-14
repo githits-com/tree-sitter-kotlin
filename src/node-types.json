@@ -1875,6 +1875,11 @@
     }
   },
   {
+    "type": "reification_modifier",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "return_expression",
     "named": true,
     "fields": {
@@ -2981,8 +2986,8 @@
     "named": false
   },
   {
-    "type": "reification_modifier",
-    "named": true
+    "type": "reified",
+    "named": false
   },
   {
     "type": "return",

@@ -49,9 +49,13 @@ module.exports = grammar({
     [$.parameter_modifier, $._reserved_identifier],
     // A modifier may also name the parameter that follows it.
     [$.parameter_modifiers],
+    [$.variance_modifier, $._reserved_identifier],
+    [$.type_parameter_modifiers],
     [$.visibility_modifier, $._reserved_identifier],
     [$.type_modifiers, $._reserved_identifier],
     [$.import, $._reserved_identifier],
+    [$.anonymous_initializer, $._reserved_identifier],
+    [$.secondary_constructor, $._reserved_identifier],
     [$._receiver_type, $._reserved_identifier],
     [$.type, $._reserved_identifier],
     [$.type, $._receiver_type, $._reserved_identifier],
@@ -237,7 +241,7 @@ module.exports = grammar({
 
     type_parameter: $ => seq(
       optional($.type_parameter_modifiers),
-      $.identifier,
+      $._identifier,
       optional(seq(':', $.type)),
     ),
 
@@ -351,7 +355,7 @@ module.exports = grammar({
       optional(seq(
         '(',
         optional($.parameter_modifiers),
-        $.identifier,
+        $._identifier,
         optional(seq(':', $.type)),
         optional(seq('=', $.expression)),
         ')',
@@ -427,7 +431,7 @@ module.exports = grammar({
 
     enum_entry: $ => seq(
       optional($.modifiers),
-      $.identifier,
+      $._identifier,
       optional($.value_arguments),
       optional($.class_body),
     ),
@@ -1063,6 +1067,7 @@ module.exports = grammar({
         'abstract',
         'actual',
         'annotation',
+        'companion',
         'const',
         'constructor',
         'crossinline',
@@ -1075,6 +1080,7 @@ module.exports = grammar({
         'get',
         'import',
         'infix',
+        'init',
         'inline',
         'inner',
         'internal',
@@ -1082,10 +1088,12 @@ module.exports = grammar({
         'noinline',
         'open',
         'operator',
+        'out',
         'override',
         'private',
         'protected',
         'public',
+        'reified',
         'sealed',
         'set',
         'suspend',
