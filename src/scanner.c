@@ -70,6 +70,13 @@ unsigned tree_sitter_kotlin_external_scanner_serialize(void *payload, char *buff
 void tree_sitter_kotlin_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {}
 
 bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+    // Only parser recovery enables both automatic semicolon types at once.
+    // Leave recovery to the internal lexer instead of repeatedly scanning
+    // unclassified source as multiline string content.
+    if (valid_symbols[SEMI] && valid_symbols[CLASS_MEMBER_SEMI]) {
+        return false;
+    }
+
     if (valid_symbols[MULTILINE_STRING_CONTENT]) {
         bool did_advance = false;
         lexer->result_symbol = MULTILINE_STRING_CONTENT;

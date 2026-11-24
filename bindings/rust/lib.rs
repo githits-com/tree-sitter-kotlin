@@ -40,6 +40,71 @@ pub const NODE_TYPES: &str = include_str!("../../src/node-types.json");
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::{c_char, c_void};
+
+    // Match the scanner callback layout in src/tree_sitter/parser.h.
+    #[repr(C)]
+    struct TestLexer {
+        lookahead: i32,
+        result_symbol: u16,
+        advance: unsafe extern "C" fn(*mut Self, bool),
+        mark_end: extern "C" fn(*mut Self),
+        get_column: extern "C" fn(*mut Self) -> u32,
+        is_at_included_range_start: extern "C" fn(*const Self) -> bool,
+        eof: unsafe extern "C" fn(*const Self) -> bool,
+        log: Option<unsafe extern "C" fn(*const Self, *const c_char, ...)>,
+    }
+
+    #[test]
+    fn recovery_leaves_input_for_the_internal_lexer() {
+        extern "C" {
+            fn tree_sitter_kotlin_external_scanner_scan(
+                payload: *mut c_void,
+                lexer: *mut TestLexer,
+                valid: *const bool,
+            ) -> bool;
+        }
+
+        unsafe extern "C" fn advance(lexer: *mut TestLexer, _skip: bool) {
+            // The scanner receives a writable pointer to the test-owned lexer.
+            unsafe { (*lexer).lookahead = 0 };
+        }
+        unsafe extern "C" fn eof(lexer: *const TestLexer) -> bool {
+            // The lexer is live for the entire scanner call.
+            unsafe { (*lexer).lookahead == 0 }
+        }
+
+        let mut lexer = TestLexer {
+            lookahead: i32::from(b'x'),
+            result_symbol: 0,
+            advance,
+            mark_end: ignore_end,
+            get_column: column,
+            is_at_included_range_start: range_start,
+            eof,
+            log: None,
+        };
+        let recovery_symbols = [true; 11];
+        // The state and lexer match the generated recovery state and C ABI.
+        let recognized = unsafe {
+            tree_sitter_kotlin_external_scanner_scan(
+                std::ptr::null_mut(),
+                &mut lexer,
+                recovery_symbols.as_ptr(),
+            )
+        };
+        assert!(!recognized);
+        assert_eq!(lexer.lookahead, i32::from(b'x'));
+    }
+
+    extern "C" fn ignore_end(_lexer: *mut TestLexer) {}
+    extern "C" fn column(_lexer: *mut TestLexer) -> u32 {
+        0
+    }
+    extern "C" fn range_start(_lexer: *const TestLexer) -> bool {
+        false
+    }
+
     #[test]
     fn test_can_load_grammar() {
         let mut parser = tree_sitter::Parser::new();
