@@ -61,6 +61,58 @@ static bool scan_words(TSLexer *lexer, const char words[MAX_WORDS][MAX_WORD_SIZE
     return false;
 }
 
+// Kotlin block comments nest. An unterminated comment extends to EOF, as in
+// the compiler, so a later scan never walks the same unterminated suffix again.
+static bool scan_block_comment(TSLexer *lexer) {
+    if (lexer->lookahead != '/') {
+        return false;
+    }
+    advance(lexer);
+    if (lexer->lookahead != '*') {
+        return false;
+    }
+    advance(lexer);
+
+    bool after_star = false;
+    unsigned nesting_depth = 1;
+    for (;;) {
+        if (lexer->eof(lexer)) {
+            lexer->result_symbol = BLOCK_COMMENT;
+            lexer->mark_end(lexer);
+            return true;
+        }
+        switch (lexer->lookahead) {
+            case '*':
+                advance(lexer);
+                after_star = true;
+                break;
+            case '/':
+                if (after_star) {
+                    advance(lexer);
+                    after_star = false;
+                    nesting_depth--;
+                    if (nesting_depth == 0) {
+                        lexer->result_symbol = BLOCK_COMMENT;
+                        lexer->mark_end(lexer);
+                        return true;
+                    }
+                } else {
+                    advance(lexer);
+                    after_star = false;
+                    if (lexer->lookahead == '*') {
+                        nesting_depth++;
+                        advance(lexer);
+                    }
+                }
+                break;
+            default:
+                advance(lexer);
+                after_star = false;
+                break;
+        }
+    }
+}
+
 void *tree_sitter_kotlin_external_scanner_create() { return NULL; }
 
 void tree_sitter_kotlin_external_scanner_destroy(void *payload) {}
@@ -71,10 +123,14 @@ void tree_sitter_kotlin_external_scanner_deserialize(void *payload, const char *
 
 bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
     // Only parser recovery enables both automatic semicolon types at once.
-    // Leave recovery to the internal lexer instead of repeatedly scanning
-    // unclassified source as multiline string content.
+    // Recovery still needs block comments, which are extras in every state.
+    // Leave all other recovery input to the internal lexer instead of
+    // repeatedly scanning unclassified source as multiline string content.
     if (valid_symbols[SEMI] && valid_symbols[CLASS_MEMBER_SEMI]) {
-        return false;
+        while (iswspace(lexer->lookahead)) {
+            skip(lexer);
+        }
+        return scan_block_comment(lexer);
     }
 
     if (valid_symbols[MULTILINE_STRING_CONTENT]) {
@@ -418,49 +474,5 @@ comment:
         return false;
     }
 
-    if (lexer->lookahead == '/') {
-        advance(lexer);
-        if (lexer->lookahead != '*') {
-            return false;
-        }
-        advance(lexer);
-
-        bool after_star = false;
-        unsigned nesting_depth = 1;
-        for (;;) {
-            switch (lexer->lookahead) {
-                case '\0':
-                    return false;
-                case '*':
-                    advance(lexer);
-                    after_star = true;
-                    break;
-                case '/':
-                    if (after_star) {
-                        advance(lexer);
-                        after_star = false;
-                        nesting_depth--;
-                        if (nesting_depth == 0) {
-                            lexer->result_symbol = BLOCK_COMMENT;
-                            lexer->mark_end(lexer);
-                            return true;
-                        }
-                    } else {
-                        advance(lexer);
-                        after_star = false;
-                        if (lexer->lookahead == '*') {
-                            nesting_depth++;
-                            advance(lexer);
-                        }
-                    }
-                    break;
-                default:
-                    advance(lexer);
-                    after_star = false;
-                    break;
-            }
-        }
-    }
-
-    return false;
+    return scan_block_comment(lexer);
 }

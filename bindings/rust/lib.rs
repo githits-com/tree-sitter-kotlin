@@ -97,6 +97,41 @@ mod tests {
         assert_eq!(lexer.lookahead, i32::from(b'x'));
     }
 
+    #[test]
+    fn recovery_still_recognizes_block_comments() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        let source = ")\n/** doc */\nfun recovered() = 1\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let sexp = root.to_sexp();
+
+        assert!(root.has_error(), "{sexp}");
+        assert!(sexp.contains("(block_comment)"), "{sexp}");
+        let function = (0..root.named_child_count())
+            .filter_map(|index| root.named_child(index))
+            .find(|node| node.kind() == "function_declaration")
+            .unwrap_or_else(|| panic!("{sexp}"));
+        let name = function.child_by_field_name("name").unwrap();
+        assert_eq!(&source[name.byte_range()], "recovered");
+    }
+
+    #[test]
+    fn unterminated_block_comment_extends_to_eof() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        let source = "fun kept() = 1\n/* open /* nested */\nfun hidden() = 2\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let sexp = root.to_sexp();
+
+        assert_eq!(root.named_child_count(), 2, "{sexp}");
+        assert_eq!(root.named_child(0).unwrap().kind(), "function_declaration");
+        let comment = root.named_child(1).unwrap();
+        assert_eq!(comment.kind(), "block_comment", "{sexp}");
+        assert_eq!(comment.end_byte(), source.len());
+    }
+
     extern "C" fn ignore_end(_lexer: *mut TestLexer) {}
     extern "C" fn column(_lexer: *mut TestLexer) -> u32 {
         0
