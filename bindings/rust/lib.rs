@@ -132,6 +132,21 @@ mod tests {
         assert_eq!(comment.end_byte(), source.len());
     }
 
+    #[test]
+    fn comment_opener_inside_string_stays_string_content() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        let source = "val pattern = \"/*\"\nfun x() = 1\n";
+        let tree = parser.parse(source, None).unwrap();
+        let root = tree.root_node();
+        let sexp = root.to_sexp();
+
+        assert!(!root.has_error(), "{sexp}");
+        assert!(!sexp.contains("block_comment"), "{sexp}");
+        assert_eq!(root.named_child_count(), 2, "{sexp}");
+        assert_eq!(root.named_child(1).unwrap().kind(), "function_declaration");
+    }
+
     extern "C" fn ignore_end(_lexer: *mut TestLexer) {}
     extern "C" fn column(_lexer: *mut TestLexer) -> u32 {
         0
