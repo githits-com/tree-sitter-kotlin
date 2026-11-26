@@ -133,49 +133,107 @@ static bool skip_quoted_on_line(TSLexer *lexer, int32_t delimiter);
 
 static inline bool is_identifier_char(int32_t c) { return iswalnum(c) || c == '_'; }
 
+static inline bool is_line_break(int32_t c) { return c == '\n' || c == '\r'; }
+
+// Template entries nest strings that can hold further entries. Deeper entries
+// are skipped as ordinary string content, which keeps the scanner's C stack
+// bounded; Kotlin source does not nest templates this deeply in practice.
+#define TEMPLATE_MAX_DEPTH 8
+
+static bool skip_string_at_depth(TSLexer *lexer, unsigned depth);
+
+// Skips the `{...}` of a `${...}` template entry whose `{` is the lookahead,
+// including nested strings and character literals. Like the enclosing scan,
+// it stops at the end of its line. Returns false when the input ends first.
+static bool skip_template_entry(TSLexer *lexer, unsigned depth) {
+    unsigned braces = 0;
+    while (!lexer->eof(lexer)) {
+        int32_t c = lexer->lookahead;
+        if (is_line_break(c)) {
+            return true;
+        }
+        if (c == '"') {
+            if (!skip_string_at_depth(lexer, depth + 1)) {
+                return false;
+            }
+            continue;
+        }
+        skip(lexer);
+        if (c == '{') {
+            braces++;
+        } else if (c == '}' && --braces == 0) {
+            return true;
+        } else if (c == '\'' && !skip_quoted_on_line(lexer, '\'')) {
+            return false;
+        }
+    }
+    return false;
+}
+
 // Skips a string literal whose first quote is the lookahead. A raw string runs
 // to the next `"""`; any other string ends at its closing quote or at the end
-// of its line, because ordinary strings cannot span lines. Templates are not
-// parsed, so a quote inside `${...}` can end the skipped region early, but
-// only within that line. Returns false when the input ends first.
-static bool skip_string_literal(TSLexer *lexer) {
+// of its line, because ordinary strings cannot span lines and an escape cannot
+// continue one. `${...}` template entries are skipped with their nested
+// literals, so a quote or brace inside them does not end the string. Returns
+// false when the input ends first.
+static bool skip_string_at_depth(TSLexer *lexer, unsigned depth) {
     skip(lexer);
+    bool raw = false;
     if (lexer->lookahead == '"') {
         skip(lexer);
         if (lexer->lookahead != '"') {
             return true;
         }
         skip(lexer);
-        unsigned quotes = 0;
-        while (!lexer->eof(lexer)) {
-            if (lexer->lookahead == '"') {
-                quotes++;
-            } else if (quotes >= 3) {
-                return true;
-            } else {
-                quotes = 0;
-            }
-            skip(lexer);
-        }
-        return quotes >= 3;
+        raw = true;
     }
-    return skip_quoted_on_line(lexer, '"');
+    unsigned quotes = 0;
+    while (!lexer->eof(lexer)) {
+        int32_t c = lexer->lookahead;
+        if (raw) {
+            if (c == '"') {
+                quotes++;
+                skip(lexer);
+                continue;
+            }
+            if (quotes >= 3) {
+                return true;
+            }
+            quotes = 0;
+        } else if (is_line_break(c)) {
+            return true;
+        }
+        skip(lexer);
+        if (c == '$' && lexer->lookahead == '{' && depth < TEMPLATE_MAX_DEPTH) {
+            if (!skip_template_entry(lexer, depth)) {
+                return false;
+            }
+        } else if (!raw && c == '\\') {
+            if (!is_line_break(lexer->lookahead) && !lexer->eof(lexer)) {
+                skip(lexer);
+            }
+        } else if (!raw && c == '"') {
+            return true;
+        }
+    }
+    return raw && quotes >= 3;
 }
+
+static bool skip_string_literal(TSLexer *lexer) { return skip_string_at_depth(lexer, 0); }
 
 // Skips a character literal or backticked identifier whose opening delimiter
 // is the lookahead, stopping at its closing delimiter or the end of its line.
 static bool skip_quoted_on_line(TSLexer *lexer, int32_t delimiter) {
     while (!lexer->eof(lexer)) {
         int32_t c = lexer->lookahead;
-        if (c == '\n') {
+        if (is_line_break(c)) {
             return true;
         }
         skip(lexer);
         if (c == '\\' && delimiter != '`') {
-            if (lexer->eof(lexer)) {
-                return false;
+            if (!is_line_break(lexer->lookahead) && !lexer->eof(lexer)) {
+                skip(lexer);
             }
-            skip(lexer);
         } else if (c == delimiter) {
             return true;
         }
@@ -209,7 +267,7 @@ static bool set_call_follows(TSLexer *lexer) {
                 continue;
             }
             char word[4] = {0};
-            uint8_t length = 0;
+            size_t length = 0;
             while (is_identifier_char(lexer->lookahead)) {
                 if (length < sizeof(word)) {
                     word[length] = (char)lexer->lookahead;

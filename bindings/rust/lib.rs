@@ -294,9 +294,45 @@ mod tests {
             ("\nset(a /* ) } */, b) // )\n", true),
             ("\nset(foo(a) { b })\n", true),
             ("\nset(items.map { it })\n", true),
+            ("\nset(@A(\"${\"{\"}\") value) {}\n", false),
+            ("\nset(@A(\"${f(\")\")}\") value) {}\n", false),
+            ("\nset(\"x\\\n)\n", true),
+            ("\nset('\\\n)\n", true),
         ] {
             let (actual, _) = scan_after_property(source.as_bytes());
             assert_eq!(actual, inserted, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn setter_scan_keeps_long_identifiers_distinct_from_val() {
+        let source = format!("\nset({}val)\n", "x".repeat(256));
+        assert_eq!(scan_after_property(source.as_bytes()).0, true);
+    }
+
+    #[test]
+    fn annotated_setters_with_template_quotes_parse_without_recovery() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        let source =
+            "class C {\n    var p = 0\n        set(@A(\"${\"{\"}\") value) { field = value }\n}\n";
+        let tree = parser.parse(source, None).unwrap();
+        let sexp = tree.root_node().to_sexp();
+        assert!(!tree.root_node().has_error(), "{sexp}");
+        assert!(sexp.contains("(setter"), "{sexp}");
+    }
+
+    #[test]
+    fn escaped_line_breaks_do_not_continue_strings() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        for source in [
+            "val a = \"x\\\nfun keep() {}\n",
+            "val a = \"x\\\r\nfun keep() {}\r\n",
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            let sexp = tree.root_node().to_sexp();
+            assert!(sexp.contains("(function_declaration"), "{source:?}: {sexp}");
         }
     }
 

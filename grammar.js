@@ -961,6 +961,9 @@ module.exports = grammar({
         alias(choice(
           token.immediate(prec(2, seq('\\', /[^bnrt'\"\\\$\r\n]/))),
           token.immediate(prec(1, /[^"\\\$\r\n]+/)),
+          // A backslash before a line break escapes nothing; the string ends
+          // at that line like any other unclosed string.
+          token.immediate(prec(0, '\\')),
           '$',
         ),
         $.string_content,
@@ -997,7 +1000,7 @@ module.exports = grammar({
     escape_sequence: _ => token.immediate(prec(1, seq(
       '\\',
       choice(
-        /[^xu0-7]/,
+        /[^xu0-7\r\n]/,
         /u[0-9a-fA-F]{4}/,
       ),
     ))),

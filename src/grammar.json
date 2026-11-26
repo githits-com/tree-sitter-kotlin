@@ -5508,6 +5508,17 @@
                       }
                     },
                     {
+                      "type": "IMMEDIATE_TOKEN",
+                      "content": {
+                        "type": "PREC",
+                        "value": 0,
+                        "content": {
+                          "type": "STRING",
+                          "value": "\\"
+                        }
+                      }
+                    },
+                    {
                       "type": "STRING",
                       "value": "$"
                     }
@@ -5661,7 +5672,7 @@
               "members": [
                 {
                   "type": "PATTERN",
-                  "value": "[^xu0-7]"
+                  "value": "[^xu0-7\\r\\n]"
                 },
                 {
                   "type": "PATTERN",
