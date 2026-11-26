@@ -133,6 +133,32 @@ mod tests {
     }
 
     #[test]
+    fn recovery_keeps_comment_openers_inside_strings() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        // Java syntax in a Kotlin file. One recovery path skips the opening
+        // quote and would read `/*` inside the string as a comment to EOF.
+        for source in [
+            "try {} catch (E e) { \"/*\" }\nfun keep() {}\n",
+            "try {} catch (E e) { \"/*\" }\n\nfun other() {}\n\nfun keep() {}\n",
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            let root = tree.root_node();
+            let sexp = root.to_sexp();
+            assert!(!sexp.contains("block_comment"), "{source}: {sexp}");
+            let kept = (0..root.named_child_count())
+                .filter_map(|index| root.named_child(index))
+                .any(|node| {
+                    node.kind() == "function_declaration"
+                        && node
+                            .child_by_field_name("name")
+                            .is_some_and(|name| &source[name.byte_range()] == "keep")
+                });
+            assert!(kept, "{source}: {sexp}");
+        }
+    }
+
+    #[test]
     fn comment_opener_inside_string_stays_string_content() {
         let mut parser = tree_sitter::Parser::new();
         parser.set_language(&super::LANGUAGE.into()).unwrap();
@@ -145,6 +171,150 @@ mod tests {
         assert!(!sexp.contains("block_comment"), "{sexp}");
         assert_eq!(root.named_child_count(), 2, "{sexp}");
         assert_eq!(root.named_child(1).unwrap().kind(), "function_declaration");
+    }
+
+    // A scanner lexer over a byte buffer that counts every advance.
+    #[repr(C)]
+    struct BufferLexer {
+        base: TestLexer,
+        bytes: *const u8,
+        len: usize,
+        pos: usize,
+        advances: usize,
+    }
+
+    unsafe extern "C" fn buffer_advance(lexer: *mut TestLexer, _skip: bool) {
+        // `base` is the first field of the repr(C) BufferLexer that owns it.
+        let lexer = unsafe { &mut *lexer.cast::<BufferLexer>() };
+        lexer.advances += 1;
+        if lexer.pos < lexer.len {
+            lexer.pos += 1;
+        }
+        lexer.base.lookahead = if lexer.pos < lexer.len {
+            // pos is in bounds of the borrowed buffer.
+            i32::from(unsafe { *lexer.bytes.add(lexer.pos) })
+        } else {
+            0
+        };
+    }
+
+    unsafe extern "C" fn buffer_eof(lexer: *const TestLexer) -> bool {
+        // `base` is the first field of the repr(C) BufferLexer that owns it.
+        let lexer = unsafe { &*lexer.cast::<BufferLexer>() };
+        lexer.pos >= lexer.len
+    }
+
+    /// Runs one automatic-semicolon scan after a property, where SET is valid,
+    /// and returns (inserted semicolon, characters examined).
+    fn scan_after_property(source: &[u8]) -> (bool, usize) {
+        // SEMI, GET and SET are valid after a property declaration.
+        let mut valid = [false; 11];
+        valid[0] = true;
+        valid[8] = true;
+        valid[9] = true;
+        scan_buffer(source, &valid)
+    }
+
+    /// Runs one external scan over `source` and returns (recognized, characters
+    /// examined).
+    fn scan_buffer(source: &[u8], valid: &[bool; 11]) -> (bool, usize) {
+        extern "C" {
+            fn tree_sitter_kotlin_external_scanner_scan(
+                payload: *mut c_void,
+                lexer: *mut TestLexer,
+                valid: *const bool,
+            ) -> bool;
+        }
+        let mut lexer = BufferLexer {
+            base: TestLexer {
+                lookahead: source.first().map_or(0, |byte| i32::from(*byte)),
+                result_symbol: 0,
+                advance: buffer_advance,
+                mark_end: ignore_end,
+                get_column: column,
+                is_at_included_range_start: range_start,
+                eof: buffer_eof,
+                log: None,
+            },
+            bytes: source.as_ptr(),
+            len: source.len(),
+            pos: 0,
+            advances: 0,
+        };
+        // The BufferLexer outlives the call and starts with the TSLexer layout.
+        let recognized = unsafe {
+            tree_sitter_kotlin_external_scanner_scan(
+                std::ptr::null_mut(),
+                (&raw mut lexer).cast::<TestLexer>(),
+                valid.as_ptr(),
+            )
+        };
+        (recognized, lexer.advances)
+    }
+
+    #[test]
+    fn unclosed_setter_parameters_stop_at_the_next_property() {
+        let tail = "\nvar q: Int = 1\n    set(value\n".repeat(1_000);
+        let source = format!("\n    set(value{tail}");
+        let (inserted, advances) = scan_after_property(source.as_bytes());
+        assert!(!inserted);
+        assert!(
+            advances < 40,
+            "examined {advances} of {} bytes",
+            source.len()
+        );
+    }
+
+    #[test]
+    fn recovery_declines_unclosed_comments_within_the_nesting_limit() {
+        let recovery = [true; 11];
+        let closed = b"/* outer /* inner */ */ fun f() {}";
+        assert_eq!(scan_buffer(closed, &recovery), (true, 23));
+
+        let unclosed = format!("/*\"){}", " /*\")".repeat(1_000));
+        let (recognized, advances) = scan_buffer(unclosed.as_bytes(), &recovery);
+        assert!(!recognized);
+        assert!(
+            advances < 60,
+            "examined {advances} of {} bytes",
+            unclosed.len()
+        );
+    }
+
+    #[test]
+    fn setter_scan_matches_parentheses_and_skips_literals() {
+        for (source, inserted) in [
+            ("\nset(value) {}\n", false),
+            ("\nset(value: (Int) -> Unit) = Unit\n", false),
+            ("\nset(@Suppress(\"x\") value) {}\n", false),
+            ("\nset(value)\n", true),
+            ("\nset(a, g(b))\n", true),
+            ("\nset(\")\", \"}\", \"val\", '(')\n", true),
+            ("\nset(\"\"\"\n}\nval\n\"\"\")\n", true),
+            ("\nset(a /* ) } */, b) // )\n", true),
+            ("\nset(foo(a) { b })\n", true),
+            ("\nset(items.map { it })\n", true),
+        ] {
+            let (actual, _) = scan_after_property(source.as_bytes());
+            assert_eq!(actual, inserted, "{source:?}");
+        }
+    }
+
+    #[test]
+    fn local_set_calls_after_properties_stay_calls() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&super::LANGUAGE.into()).unwrap();
+        for source in [
+            "fun f() {\n    val x = 1\n    set(a, g(b))\n}\n",
+            "fun f() {\n    val x = 1\n    set(\"}\")\n}\n",
+            "fun f() {\n    val x = 1\n    set(foo(a) { b })\n}\n",
+        ] {
+            let tree = parser.parse(source, None).unwrap();
+            let sexp = tree.root_node().to_sexp();
+            assert!(!tree.root_node().has_error(), "{source}: {sexp}");
+            assert!(!sexp.contains("(setter"), "{source}: {sexp}");
+            assert!(sexp.contains("(call_expression"), "{source}: {sexp}");
+        }
     }
 
     extern "C" fn ignore_end(_lexer: *mut TestLexer) {}

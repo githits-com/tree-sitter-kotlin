@@ -61,9 +61,57 @@ static bool scan_words(TSLexer *lexer, const char words[MAX_WORDS][MAX_WORD_SIZE
     return false;
 }
 
-// Kotlin block comments nest. An unterminated comment extends to EOF, as in
-// the compiler, so a later scan never walks the same unterminated suffix again.
-static bool scan_block_comment(TSLexer *lexer) {
+// Parser recovery accepts a block comment only when it closes within this
+// nesting depth. No comment in the measured Kotlin corpora nests deeper than 1.
+#define RECOVERY_COMMENT_MAX_DEPTH 8
+
+// Walks the rest of a nested block comment after its opening `/*`. Returns
+// false when the input ends first, or when the comment nests deeper than
+// max_depth.
+static bool finish_block_comment(TSLexer *lexer, bool skip_chars, unsigned max_depth) {
+    bool after_star = false;
+    unsigned nesting_depth = 1;
+    while (!lexer->eof(lexer)) {
+        switch (lexer->lookahead) {
+            case '*':
+                lexer->advance(lexer, skip_chars);
+                after_star = true;
+                break;
+            case '/':
+                lexer->advance(lexer, skip_chars);
+                if (after_star) {
+                    after_star = false;
+                    nesting_depth--;
+                    if (nesting_depth == 0) {
+                        return true;
+                    }
+                } else if (lexer->lookahead == '*') {
+                    if (++nesting_depth > max_depth) {
+                        return false;
+                    }
+                    lexer->advance(lexer, skip_chars);
+                }
+                break;
+            default:
+                lexer->advance(lexer, skip_chars);
+                after_star = false;
+                break;
+        }
+    }
+    return false;
+}
+
+// Kotlin block comments nest. Outside recovery an unterminated comment extends
+// to EOF, as in the compiler, so a later scan never walks the same
+// unterminated suffix again.
+//
+// During recovery the comment must close. Recovery can skip a string's opening
+// quote and read the string's interior as code, where a `/*` such as the one in
+// "image/*" would open a comment that hides every later declaration. Each
+// opener nested inside a walk raises its depth, so the depth limit stops every
+// walk after a bounded number of later unclosed openers. Declined recovery
+// openers therefore cost time linear in the file.
+static bool scan_block_comment(TSLexer *lexer, bool in_recovery) {
     if (lexer->lookahead != '/') {
         return false;
     }
@@ -72,45 +120,167 @@ static bool scan_block_comment(TSLexer *lexer) {
         return false;
     }
     advance(lexer);
+    bool closed = finish_block_comment(lexer, false, in_recovery ? RECOVERY_COMMENT_MAX_DEPTH : UINT32_MAX);
+    if (!closed && in_recovery) {
+        return false;
+    }
+    lexer->result_symbol = BLOCK_COMMENT;
+    lexer->mark_end(lexer);
+    return true;
+}
 
-    bool after_star = false;
-    unsigned nesting_depth = 1;
-    for (;;) {
-        if (lexer->eof(lexer)) {
-            lexer->result_symbol = BLOCK_COMMENT;
-            lexer->mark_end(lexer);
+static bool skip_quoted_on_line(TSLexer *lexer, int32_t delimiter);
+
+static inline bool is_identifier_char(int32_t c) { return iswalnum(c) || c == '_'; }
+
+// Skips a string literal whose first quote is the lookahead. A raw string runs
+// to the next `"""`; any other string ends at its closing quote or at the end
+// of its line, because ordinary strings cannot span lines. Templates are not
+// parsed, so a quote inside `${...}` can end the skipped region early, but
+// only within that line. Returns false when the input ends first.
+static bool skip_string_literal(TSLexer *lexer) {
+    skip(lexer);
+    if (lexer->lookahead == '"') {
+        skip(lexer);
+        if (lexer->lookahead != '"') {
             return true;
         }
-        switch (lexer->lookahead) {
-            case '*':
-                advance(lexer);
-                after_star = true;
+        skip(lexer);
+        unsigned quotes = 0;
+        while (!lexer->eof(lexer)) {
+            if (lexer->lookahead == '"') {
+                quotes++;
+            } else if (quotes >= 3) {
+                return true;
+            } else {
+                quotes = 0;
+            }
+            skip(lexer);
+        }
+        return quotes >= 3;
+    }
+    return skip_quoted_on_line(lexer, '"');
+}
+
+// Skips a character literal or backticked identifier whose opening delimiter
+// is the lookahead, stopping at its closing delimiter or the end of its line.
+static bool skip_quoted_on_line(TSLexer *lexer, int32_t delimiter) {
+    while (!lexer->eof(lexer)) {
+        int32_t c = lexer->lookahead;
+        if (c == '\n') {
+            return true;
+        }
+        skip(lexer);
+        if (c == '\\' && delimiter != '`') {
+            if (lexer->eof(lexer)) {
+                return false;
+            }
+            skip(lexer);
+        } else if (c == delimiter) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Decides whether `set(` on a new line after a property is a call statement,
+// which needs an automatic semicolon before it, or a setter. The lookahead is
+// the opening parenthesis.
+//
+// Only local properties are followed by `set(...)` calls; members and
+// top-level properties always take a setter there. As before, a call is
+// recognized by a line break right after its matching `)`, and an unclosed list
+// keeps the setter reading. The scan stops at the first `{`: a setter
+// parameter list never contains a block or lambda, so the text is a call. It
+// stops at an unmatched `}` or a `val`/`var` keyword, which cannot occur in
+// either list and mark the list as unclosed. Every other property begins with
+// `val` or `var`, and a property nested inside an earlier one ends before a
+// `}`, so no scan reaches past the next property's start. Unclosed setters
+// therefore cost time linear in the file instead of a walk to EOF each.
+static bool set_call_follows(TSLexer *lexer) {
+    unsigned depth = 0;
+    bool in_word = false;
+    while (!lexer->eof(lexer)) {
+        int32_t c = lexer->lookahead;
+        if (is_identifier_char(c)) {
+            if (in_word || !iswalpha(c)) {
+                skip(lexer);
+                in_word = true;
+                continue;
+            }
+            char word[4] = {0};
+            uint8_t length = 0;
+            while (is_identifier_char(lexer->lookahead)) {
+                if (length < sizeof(word)) {
+                    word[length] = (char)lexer->lookahead;
+                }
+                length++;
+                skip(lexer);
+            }
+            if (length == 3 && (memcmp(word, "val", 3) == 0 || memcmp(word, "var", 3) == 0)) {
+                return false;
+            }
+            in_word = false;
+            continue;
+        }
+        in_word = false;
+        switch (c) {
+            case '(':
+                depth++;
+                skip(lexer);
+                break;
+            case ')':
+                skip(lexer);
+                if (--depth == 0) {
+                    while (iswspace(lexer->lookahead)) {
+                        if (lexer->lookahead == '\n') {
+                            return true;
+                        }
+                        skip(lexer);
+                    }
+                    // A trailing line comment also ends the line.
+                    if (lexer->lookahead == '/') {
+                        skip(lexer);
+                        return lexer->lookahead == '/';
+                    }
+                    return false;
+                }
+                break;
+            case '{':
+                return true;
+            case '}':
+                return false;
+            case '"':
+                if (!skip_string_literal(lexer)) {
+                    return false;
+                }
+                break;
+            case '\'':
+            case '`':
+                skip(lexer);
+                if (!skip_quoted_on_line(lexer, c)) {
+                    return false;
+                }
                 break;
             case '/':
-                if (after_star) {
-                    advance(lexer);
-                    after_star = false;
-                    nesting_depth--;
-                    if (nesting_depth == 0) {
-                        lexer->result_symbol = BLOCK_COMMENT;
-                        lexer->mark_end(lexer);
-                        return true;
+                skip(lexer);
+                if (lexer->lookahead == '/') {
+                    while (!lexer->eof(lexer) && lexer->lookahead != '\n') {
+                        skip(lexer);
                     }
-                } else {
-                    advance(lexer);
-                    after_star = false;
-                    if (lexer->lookahead == '*') {
-                        nesting_depth++;
-                        advance(lexer);
+                } else if (lexer->lookahead == '*') {
+                    skip(lexer);
+                    if (!finish_block_comment(lexer, true, UINT32_MAX)) {
+                        return false;
                     }
                 }
                 break;
             default:
-                advance(lexer);
-                after_star = false;
+                skip(lexer);
                 break;
         }
     }
+    return false;
 }
 
 void *tree_sitter_kotlin_external_scanner_create() { return NULL; }
@@ -130,7 +300,7 @@ bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, con
         while (iswspace(lexer->lookahead)) {
             skip(lexer);
         }
-        return scan_block_comment(lexer);
+        return scan_block_comment(lexer, true);
     }
 
     if (valid_symbols[MULTILINE_STRING_CONTENT]) {
@@ -349,19 +519,7 @@ bool tree_sitter_kotlin_external_scanner_scan(void *payload, TSLexer *lexer, con
                 else if (index == 4 && (!valid_symbols[SET] || lexer->lookahead == '[' || lexer->lookahead == '(' ||
                                         lexer->lookahead == '.')) {
                     if (lexer->lookahead == '(' && valid_symbols[SET]) {
-                        // skip until the closing parenthesis
-                        while (lexer->lookahead != ')' && !lexer->eof(lexer)) {
-                            skip(lexer);
-                        }
-                        skip(lexer);
-
-                        while (iswspace(lexer->lookahead)) {
-                            if (lexer->lookahead == '\n') {
-                                return true;
-                            }
-                            skip(lexer);
-                        }
-                        return false;
+                        return set_call_follows(lexer);
                     }
                     return true;
                 }
@@ -474,5 +632,5 @@ comment:
         return false;
     }
 
-    return scan_block_comment(lexer);
+    return scan_block_comment(lexer, false);
 }

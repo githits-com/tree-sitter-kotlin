@@ -959,8 +959,8 @@ module.exports = grammar({
       '"',
       repeat(choice(
         alias(choice(
-          token.immediate(prec(2, seq('\\', /[^bnrt'\"\\\$]/))),
-          token.immediate(prec(1, /[^"\\\$]+/)),
+          token.immediate(prec(2, seq('\\', /[^bnrt'\"\\\$\r\n]/))),
+          token.immediate(prec(1, /[^"\\\$\r\n]+/)),
           '$',
         ),
         $.string_content,
