@@ -143,7 +143,7 @@ static inline bool is_line_break(int32_t c) { return c == '\n' || c == '\r'; }
 static bool skip_string_at_depth(TSLexer *lexer, unsigned depth);
 
 // Skips the `{...}` of a `${...}` template entry whose `{` is the lookahead,
-// including nested strings and character literals. Like the enclosing scan,
+// including nested strings, character literals and comments. Like the enclosing scan,
 // it stops at the end of its line. Returns false when the input ends first.
 static bool skip_template_entry(TSLexer *lexer, unsigned depth) {
     unsigned braces = 0;
@@ -165,6 +165,15 @@ static bool skip_template_entry(TSLexer *lexer, unsigned depth) {
             return true;
         } else if (c == '\'' && !skip_quoted_on_line(lexer, '\'')) {
             return false;
+        } else if (c == '/' && lexer->lookahead == '*') {
+            skip(lexer);
+            if (!finish_block_comment(lexer, true, UINT32_MAX)) {
+                return false;
+            }
+        } else if (c == '/' && lexer->lookahead == '/') {
+            while (!lexer->eof(lexer) && !is_line_break(lexer->lookahead)) {
+                skip(lexer);
+            }
         }
     }
     return false;

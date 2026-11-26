@@ -298,6 +298,8 @@ mod tests {
             ("\nset(@A(\"${f(\")\")}\") value) {}\n", false),
             ("\nset(\"x\\\n)\n", true),
             ("\nset('\\\n)\n", true),
+            ("\nset(\"${ /* { */ 1 }\")\n", true),
+            ("\nset(\"${ f() // } \"\n)\n", true),
         ] {
             let (actual, _) = scan_after_property(source.as_bytes());
             assert_eq!(actual, inserted, "{source:?}");
